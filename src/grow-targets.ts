@@ -1,16 +1,17 @@
-import { getAllHosts, wgw } from 'scripts/util.js';
+import { NS } from 'NetscriptDefinitions';
+import { getAllHosts, wgw } from './scripts/util';
 
 /** @param {NS} ns **/
-export async function main(ns) {
-	const [targetGrowth] = ns.args;
+export async function main(ns: NS) {
+	const [targetGrowth] = ns.args as [number];
 	const growScript = '/scripts/grow.js';
 	const weakenScript = '/scripts/weaken.js';
 	const hosts = getAllHosts(ns, 'home', 0, [])
-		.map((host) => { return { host, server: ns.getServer(host) } })
+		.map((host: string) => { return { host, server: ns.getServer(host) } })
 		.filter(({ server: { moneyAvailable, moneyMax } }) => moneyAvailable < moneyMax)
-		.map((obj) => { return { ...obj, wgw: wgw(ns, obj.host, growScript, weakenScript, targetGrowth) } })
+		.map((obj: any) => { return { ...obj, wgw: wgw(ns, obj.host, growScript, weakenScript, targetGrowth) } })
 		.filter(({ server: { hasAdminRights } }) => hasAdminRights)
-		.sort((a, b) => b.wgw.totalCost - a.wgw.totalCost)
+		.sort((a: any, b: any) => b.wgw.totalCost - a.wgw.totalCost)
 		.map(({
 			host,
 			wgw: {
