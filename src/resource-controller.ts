@@ -1,11 +1,19 @@
 import { NS } from "NetscriptDefinitions";
 
+const requestMap: any = {
+    allocate: { func: allocate, hasResponse: true },
+    allocateAll: { func: allocateAll, hasResponse: true },
+}
+
+const scriptTypeMap: any = {
+    hack: { getServers: getManagedServers },
+    grow: { getServers: getHomeFirst },
+    weaken: { getServers: getHomeFirst },
+}
+
 export async function main(ns: NS) {
-    ns.exec('clearPorts.js', 'home', 1);
-    const requestMap = {
-        allocate: { func: allocate, hasResponse: true },
-        allocateAll: { func: allocateAll, hasResponse: true },
-    }
+    ns.clearPort(1);
+    ns.clearPort(2);
     ns.disableLog('ALL');
     while (true) {
         const request = JSON.parse(await blockRead(ns, 1));
@@ -21,8 +29,20 @@ function getManagedServers(ns: NS) {
     const servers = ns.getPurchasedServers()
         .map((server) => { return { name: server, available: ns.getServerMaxRam(server) - ns.getServerUsedRam(server) } })
         .sort((a, b) => a.available - b.available);
-    servers.push({ name: 'home', available: ns.getServerMaxRam('home') - ns.getServerUsedRam('home') })
+    servers.push({ name: 'home', available: ns.getServerMaxRam('home') - ns.getServerUsedRam('home') - 10 })
     return servers;
+}
+
+function getHomeFirst(ns: NS) {
+    const servers = ns.getPurchasedServers()
+        .map((server) => { return { name: server, available: ns.getServerMaxRam(server) - ns.getServerUsedRam(server) } })
+        .sort((a, b) => a.available - b.available);
+    servers.unshift({ name: 'home', available: ns.getServerMaxRam('home') - ns.getServerUsedRam('home') - 10 })
+    return servers;
+}
+
+function getHome(ns: NS) {
+    return { name: 'home', available: ns.getServerMaxRam('home') - ns.getServerUsedRam('home') - 10 };
 }
 
 // request: {script, threads, args}
@@ -45,10 +65,10 @@ async function allocate(ns: NS, request: AllocateRequest) {
 async function allocateAll(ns: NS, request: AllocateAllRequest) {
     const { requests } = request;
     const pids: number[] = [];
-    for (const { script, threads, args } of requests) {
+    for (const { script, scriptType, threads, args } of requests) {
         const cost = ns.getScriptRam(script) * threads;
         let allocated = false;
-        for (const { name, available } of getManagedServers(ns)) {
+        for (const { name, available } of scriptTypeMap[scriptType].getServers(ns)) {
             if (available >= cost && threads > 0) {
                 allocated = true;
                 await ns.scp(script, name);

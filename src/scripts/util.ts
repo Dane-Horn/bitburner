@@ -1,4 +1,5 @@
 import { NS } from "NetscriptDefinitions";
+const CORES = 1;
 
 function getAllHosts(ns: NS, current: string, depth: number, result: string[]) {
     result.push(current);
@@ -60,7 +61,7 @@ function hwgw(ns: NS, target: string, hackThreads: number, hackScript: string, g
     const hackWeakenThreads = weakenThreadsRequired(ns, hackSecurityGain);
     const hackWeakenCost = ns.getScriptRam(weakenScript) * hackWeakenThreads;
     const percentageRequired = (growthPercentageRequired(ns, target, hackGain) + 0.02) || 0;
-    const growThreads = Math.ceil(ns.growthAnalyze(target, 1 + percentageRequired)) || 1;
+    const growThreads = Math.ceil(ns.growthAnalyze(target, 1 + percentageRequired, CORES)) || 1;
     const growCost = ns.getScriptRam(growScript) * growThreads;
     const growSecurityGain = ns.growthAnalyzeSecurity(growThreads);
     const growWeakenThreads = weakenThreadsRequired(ns, growSecurityGain);
@@ -100,54 +101,64 @@ function hwgw(ns: NS, target: string, hackThreads: number, hackScript: string, g
     };
 }
 
-async function runHackBatch(ns: NS, target: string, hackThreads: number, hackScript: string, growScript: string, weakenScript: string, delay: number, longestTime?: number) {
+async function runHackBatch(ns: NS, target: string, hackThreads: number, hackScript: string, growScript: string, weakenScript: string, delay: number, longestTime?: number, batches?: number) {
     const batchDetails = hwgw(ns, target, hackThreads, hackScript, growScript, weakenScript);
     const { hackDelay, growDelay, weakenDelay } = getDelays(ns, target, longestTime);
-    const hackRequest = {
-        type: 'allocate',
-        script: hackScript,
-        threads: batchDetails.hack.threads,
-        args: [target, hackDelay + (0 * delay), 'hack', generateUuid()],
-    };
-    const hackWeakenRequest = {
-        script: weakenScript,
-        threads: batchDetails.hackWeaken.threads,
-        args: [target, weakenDelay + (1 * delay), 'hackWeaken', generateUuid()],
-    };
-    await ns.asleep(delay);
-    const growRequest = {
-        script: growScript,
-        threads: batchDetails.grow.threads,
-        args: [target, growDelay + (2 * delay), 'grow', generateUuid()],
-    };
-    await ns.asleep(delay);
-    const growWeakenRequest = {
-        script: weakenScript,
-        threads: batchDetails.growWeaken.threads,
-        args: [target, weakenDelay + (3 * delay), 'growWeaken', generateUuid()],
-    };
-    const { pids } = await request(ns, 1, 2, { type: 'allocateAll', requests: [hackRequest, hackWeakenRequest, growRequest, growWeakenRequest] });
-    if (pids.some((pid: number) => !pid)) {
-        ns.kill(pids[0]);
-        ns.kill(pids[1]);
-        ns.kill(pids[2]);
-        ns.kill(pids[3]);
-        ns.exit();
+    let offset = 0;
+    let requests: AllocateRequest[] = [];
+    for (let i = 0; i < (batches || 1); i++) {
+        requests.push({
+            type: 'allocate',
+            script: hackScript,
+            scriptType: "hack",
+            threads: batchDetails.hack.threads,
+            args: [target, hackDelay + (offset++ * delay), 'hack', generateUuid()],
+        });
+        requests.push({
+            type: 'allocate',
+            script: weakenScript,
+            scriptType: 'weaken',
+            threads: batchDetails.hackWeaken.threads,
+            args: [target, weakenDelay + (offset++ * delay), 'hackWeaken', generateUuid()],
+        });
+        requests.push({
+            type: 'allocate',
+            script: growScript,
+            scriptType: 'grow',
+            threads: batchDetails.grow.threads,
+            args: [target, growDelay + (offset++ * delay), 'grow', generateUuid()],
+        });
+        requests.push({
+            type: 'allocate',
+            script: weakenScript,
+            scriptType: 'weaken',
+            threads: batchDetails.growWeaken.threads,
+            args: [target, weakenDelay + (offset++ * delay), 'growWeaken', generateUuid()],
+        });
     }
-    await ns.asleep(delay);
+    const { pids } = await request(ns, 1, 2, { type: 'allocateAll', requests });
+    if (pids.some((pid: number) => !pid)) {
+        for (const pid of pids) {
+            ns.kill(pid);
+        }
+        return false;
+    }
+    return true;
 }
 
 async function runHackBatchStatic(ns: NS, target: string, hackThreads: number, hackScript: string, growScript: string, weakenScript: string, delay: number, host: string, longestTime?: number) {
     const batchDetails = hwgw(ns, target, hackThreads, hackScript, growScript, weakenScript);
     const { hackDelay, growDelay, weakenDelay } = getDelays(ns, target, longestTime);
+    await ns.scp([hackScript, growScript, weakenScript], host);
     const hackPid = ns.exec(hackScript, host, batchDetails.hack.threads, ...[target, hackDelay + (0 * delay), 'hack', generateUuid()])
     await ns.asleep(delay);
-    const hackWeakenPid = ns.exec(weakenScript, host, batchDetails.hackWeaken.threads, ...[target, weakenDelay + (1 * delay), 'hackWeaken', generateUuid()]);
+    const hackWeakenPid = ns.exec(weakenScript, 'home', batchDetails.hackWeaken.threads, ...[target, weakenDelay + (1 * delay), 'hackWeaken', generateUuid()]);
     await ns.asleep(delay);
-    const growPid = ns.exec(growScript, host, batchDetails.grow.threads, ...[target, growDelay + (2 * delay), 'grow', generateUuid()]);
+    const growPid = ns.exec(growScript, 'home', batchDetails.grow.threads, ...[target, growDelay + (2 * delay), 'grow', generateUuid()]);
     await ns.asleep(delay);
-    const growWeakenPid = ns.exec(weakenScript, host, batchDetails.growWeaken.threads, ...[target, weakenDelay + (3 * delay), 'growWeaken', generateUuid()]);
+    const growWeakenPid = ns.exec(weakenScript, 'home', batchDetails.growWeaken.threads, ...[target, weakenDelay + (3 * delay), 'growWeaken', generateUuid()]);
     await ns.asleep(delay);
+    ns.print(`${hackPid} ${hackWeakenPid} ${growPid} ${growWeakenPid}`)
     if (!(hackPid || hackWeakenPid || growPid || growWeakenPid)) {
         ns.kill(hackPid);
         ns.kill(hackWeakenPid);
@@ -241,6 +252,8 @@ async function runGrowBatchHome(ns: NS, target: string, growScript: string, weak
         ns.kill(weakenPid)
         ns.kill(growPid)
         ns.kill(growWeakenPid)
+        ns.tprint(`target growth: ${targetGrowth}`)
+        ns.tprint(`pids: ${weakenPid} ${growPid} ${growWeakenPid}`)
         if (i++ >= 10) ns.exit();
         const batchDetails = wgw(ns, target, growScript, weakenScript, targetGrowth);
         const { growDelay, weakenDelay } = getDelays(ns, target);
@@ -256,7 +269,7 @@ async function runGrowBatchHome(ns: NS, target: string, growScript: string, weak
 
 function weakenThreadsRequired(ns: NS, securityAmount: number) {
     let threads = 0;
-    while (ns.weakenAnalyze(threads) < securityAmount) threads += 1;
+    while (ns.weakenAnalyze(threads, CORES) < securityAmount) threads += 1;
     return threads + 1;
 }
 
