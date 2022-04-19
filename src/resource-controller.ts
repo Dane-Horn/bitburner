@@ -7,8 +7,8 @@ const requestMap: any = {
 
 const scriptTypeMap: any = {
     hack: { getServers: getManagedServers },
-    grow: { getServers: getHomeFirst },
-    weaken: { getServers: getHomeFirst },
+    grow: { getServers: getManagedServers },
+    weaken: { getServers: getManagedServers },
 }
 
 export async function main(ns: NS) {

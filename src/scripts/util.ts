@@ -205,42 +205,49 @@ function wgw(ns: NS, target: string, growScript: string, weakenScript: string, t
     };
 }
 
-async function runGrowBatch(ns: NS, target: string, growScript: string, weakenScript: string, targetGrowth: number, delay: number) {
-    const batchDetails = wgw(ns, target, growScript, weakenScript, targetGrowth);
-    const { growDelay, weakenDelay } = getDelays(ns, target);
-    const { pid: weakenPid } = batchDetails.weaken.threads > 0 ?
-        await request(ns, 1, 2, {
-            type: 'allocate',
-            script: weakenScript,
-            threads: batchDetails.weaken.threads,
-            args: [target, weakenDelay, 'weaken', generateUuid()],
-        })
-        : { pid: -1 };
-    await ns.asleep(delay);
-    const { pid: growPid } = batchDetails.grow.threads > 0
-        ? await request(ns, 1, 2, {
-            type: 'allocate',
-            script: growScript,
-            threads: batchDetails.grow.threads,
-            args: [target, growDelay, 'grow', generateUuid()],
-        })
-        : { pid: -1 };
-    await ns.asleep(delay);
-    const { pid: growWeakenPid } = batchDetails.growWeaken.threads > 0
-        ? await request(ns, 1, 2, {
-            type: 'allocate',
-            script: weakenScript,
-            threads: batchDetails.growWeaken.threads,
-            args: [target, weakenDelay, 'growWeaken', generateUuid()],
-        })
-        : { pid: -1 };
-    if (!weakenPid || !growPid || !growWeakenPid) {
-        ns.kill(weakenPid);
-        ns.kill(growPid);
-        ns.kill(growWeakenPid);
-        ns.exit();
+async function runGrowBatch(ns: NS, target: string, growScript: string, weakenScript: string, targetGrowth: number, delay: number, longestTime?: number, batches?: number) {
+    let offset = 0;
+    let requests: AllocateRequest[] = [];
+    let pids = [0, 0, 0];
+    let tries = 0;
+    while (pids.some((pid: number) => !pid)) {
+        if (tries++ >= 10) {
+            ns.print('failed to run grow batch')
+            ns.exit();
+        }
+        const batchDetails = wgw(ns, target, growScript, weakenScript, targetGrowth);
+        const { growDelay, weakenDelay } = getDelays(ns, target, longestTime);
+        for (const pid of pids) {
+            ns.kill(pid);
+        }
+        requests = [];
+        for (let i = 0; i < (batches || 1); i++) {
+            requests.push({
+                type: 'allocate',
+                script: weakenScript,
+                scriptType: 'weaken',
+                threads: batchDetails.weaken.threads,
+                args: [target, weakenDelay + (offset++ * delay), 'hackWeaken', generateUuid()],
+            });
+            requests.push({
+                type: 'allocate',
+                script: growScript,
+                scriptType: 'grow',
+                threads: batchDetails.grow.threads,
+                args: [target, growDelay + (offset++ * delay), 'grow', generateUuid()],
+            });
+            requests.push({
+                type: 'allocate',
+                script: weakenScript,
+                scriptType: 'weaken',
+                threads: batchDetails.growWeaken.threads,
+                args: [target, weakenDelay + (offset++ * delay), 'growWeaken', generateUuid()],
+            });
+        }
+        const response = await request(ns, 1, 2, { type: 'allocateAll', requests });
+        pids = response.pids;
+        targetGrowth = targetGrowth * 0.5;
     }
-    await ns.asleep(delay);
 }
 
 async function runGrowBatchHome(ns: NS, target: string, growScript: string, weakenScript: string, targetGrowth: number, delay: number) {

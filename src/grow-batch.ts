@@ -1,5 +1,5 @@
 import { NS } from 'NetscriptDefinitions';
-import { runGrowBatchHome, getDelays } from './scripts/util'
+import { runGrowBatch, getDelays } from './scripts/util'
 
 const delay = 200;
 const growScript = `/scripts/grow.js`;
@@ -13,7 +13,7 @@ export async function main(ns: NS) {
         const { longestTime } = getDelays(ns, target);
         const server = ns.getServer(target);
         const growthRequired = (server.moneyMax - server.moneyAvailable) / server.moneyAvailable;
-        await runGrowBatchHome(ns, target, growScript, weakenScript, growthRequired, delay);
+        await runGrowBatch(ns, target, growScript, weakenScript, growthRequired, delay, longestTime, 1);
         await ns.asleep(longestTime);
     }
 }
