@@ -13,8 +13,8 @@ export async function main(ns: NS) {
         const { longestTime } = getDelays(ns, target);
         const server = ns.getServer(target);
         const growthRequired = (server.moneyMax - server.moneyAvailable) / server.moneyAvailable;
-        await runGrowBatch(ns, target, growScript, weakenScript, growthRequired, delay, longestTime, 1);
-        await ns.asleep(longestTime);
+        await runGrowBatch(ns, target, growScript, weakenScript, growthRequired, delay, 1);
+        await ns.asleep(longestTime + delay * 20);
     }
 }
 

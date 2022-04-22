@@ -1,14 +1,14 @@
 import { NS } from "NetscriptDefinitions";
-
+import { getAvailableServers } from "scripts/util"
 const requestMap: any = {
     allocate: { func: allocate, hasResponse: true },
     allocateAll: { func: allocateAll, hasResponse: true },
 }
 
 const scriptTypeMap: any = {
-    hack: { getServers: getManagedServers },
-    grow: { getServers: getManagedServers },
-    weaken: { getServers: getManagedServers },
+    hack: { getServers: getAvailableServers },
+    grow: { getServers: getAvailableServers },
+    weaken: { getServers: getAvailableServers },
 }
 
 export async function main(ns: NS) {
@@ -25,32 +25,12 @@ export async function main(ns: NS) {
     }
 }
 
-function getManagedServers(ns: NS) {
-    const servers = ns.getPurchasedServers()
-        .map((server) => { return { name: server, available: ns.getServerMaxRam(server) - ns.getServerUsedRam(server) } })
-        .sort((a, b) => a.available - b.available);
-    servers.push({ name: 'home', available: ns.getServerMaxRam('home') - ns.getServerUsedRam('home') - 10 })
-    return servers;
-}
-
-function getHomeFirst(ns: NS) {
-    const servers = ns.getPurchasedServers()
-        .map((server) => { return { name: server, available: ns.getServerMaxRam(server) - ns.getServerUsedRam(server) } })
-        .sort((a, b) => a.available - b.available);
-    servers.unshift({ name: 'home', available: ns.getServerMaxRam('home') - ns.getServerUsedRam('home') - 10 })
-    return servers;
-}
-
-function getHome(ns: NS) {
-    return { name: 'home', available: ns.getServerMaxRam('home') - ns.getServerUsedRam('home') - 10 };
-}
-
 // request: {script, threads, args}
 // response: {pid: int}
 async function allocate(ns: NS, request: AllocateRequest) {
     const { script, threads, args } = request;
     const cost = ns.getScriptRam(script) * threads;
-    for (const { name, available } of getManagedServers(ns)) {
+    for (const { name, available } of getAvailableServers(ns)) {
         if (available >= cost) {
             await ns.scp(script, name);
             const pid = ns.exec(script, name, threads, ...args)
@@ -64,22 +44,29 @@ async function allocate(ns: NS, request: AllocateRequest) {
 // response: {pids: [int]}
 async function allocateAll(ns: NS, request: AllocateAllRequest) {
     const { requests } = request;
-    const pids: number[] = [];
-    for (const { script, scriptType, threads, args } of requests) {
+    const servers = getAvailableServers(ns);
+    for (const { script } of requests) {
+        for (const { name } of servers) {
+            await ns.scp(script, name);
+        }
+    }
+
+    const targetedRequests = requests.map((request) => {
+        const { script, threads } = request;
         const cost = ns.getScriptRam(script) * threads;
-        let allocated = false;
-        for (const { name, available } of scriptTypeMap[scriptType].getServers(ns)) {
-            if (available >= cost && threads > 0) {
-                allocated = true;
-                await ns.scp(script, name);
-                const pid = ns.exec(script, name, threads, ...args)
-                pids.push(pid);
-                break;
+        for (let i = 0; i < servers.length; i++) {
+            if (servers[i].available >= cost && threads > 0) {
+                servers[i].available -= cost;
+                return Object.assign(request, { target: servers[i].name });
             }
         }
-        if (!allocated) pids.push(0);
-    }
-    ns.print(pids);
+        return Object.assign(request, { target: null })
+    });
+    const pids = targetedRequests.map(({ script, target, threads, args }) => {
+        return target
+            ? ns.exec(script, target, threads, ...args)
+            : 0;
+    });
     return { ...request, pids };
 }
 

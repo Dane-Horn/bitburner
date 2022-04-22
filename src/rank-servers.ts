@@ -2,7 +2,7 @@ import { NS } from 'NetscriptDefinitions';
 import { getAllHosts, mostEfficient } from './scripts/util';
 
 export async function main(ns: NS) {
-	const [hackThreads, filterCode] = ns.args as [number, string];
+	const [hackThreads = 100, filterCode = "true"] = ns.args as [number, string];
 	const hackScript = '/scripts/hack.js';
 	const growScript = '/scripts/grow.js';
 	const weakenScript = '/scripts/weaken.js';
@@ -14,12 +14,13 @@ export async function main(ns: NS) {
         .map(({
 			host,
 			hwgw: {
-				gainPerMsPerGB, hack, hackWeaken, grow, growWeaken, totalCost, batchTime,
+				gainPerMsPerGB, hack, hackWeaken, grow, growWeaken, totalCost, batchTime, maxHackThreads,
 			},
 			server
 		}) => {
 			return {
-				host,
+                host,
+                maxHackThreads,
 				totalCost,
 				batchTime,
 				gainPerMsPerGB,

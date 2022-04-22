@@ -1,5 +1,5 @@
 import { NS } from "NetscriptDefinitions";
-const CORES = 1;
+import { getGrowTime, getHackTime, getWeakenTime } from "scripts/formulas";
 
 function getAllHosts(ns: NS, current: string, depth: number, result: string[]) {
     result.push(current);
@@ -9,6 +9,16 @@ function getAllHosts(ns: NS, current: string, depth: number, result: string[]) {
         result = getAllHosts(ns, neighbour, depth + 1, result);
     }
     return result;
+}
+
+function getAvailableServers(ns: NS) {
+    const servers = getAllHosts(ns, 'home', 0, [])
+        .map(host => ns.getServer(host))
+        .filter(server => server.hostname !== 'home' && server.hasAdminRights)
+        .map((server) => { return { name: server.hostname, available: server.maxRam - server.ramUsed } })
+        .sort((a, b) => a.available - b.available);
+    servers.push({ name: 'home', available: ns.getServerMaxRam('home') - ns.getServerUsedRam('home') - 10 })
+    return servers;
 }
 
 function pick(obj: any, fields: string[]) {
@@ -35,11 +45,13 @@ function buildPaths(ns: NS, current: string, depth: number, path: string[], resu
     return result;
 }
 
-function getDelays(ns: NS, target: string, length?: number) {
-    const weakenTime = ns.getWeakenTime(target);
-    const hackTime = ns.getHackTime(target);
-    const growTime = ns.getGrowTime(target);
-    const longestTime = Math.max(weakenTime, hackTime, growTime, (length || 0));
+function getDelays(ns: NS, target: string) {
+    const targetServer = ns.getServer(target);
+    const player = ns.getPlayer();
+    const weakenTime = getWeakenTime(targetServer, player);
+    const hackTime = getHackTime(targetServer, player);
+    const growTime = getGrowTime(targetServer, player);
+    const longestTime = Math.max(weakenTime, hackTime, growTime);
     return {
         hackDelay: longestTime - hackTime,
         growDelay: longestTime - growTime,
@@ -49,19 +61,22 @@ function getDelays(ns: NS, target: string, length?: number) {
 }
 
 function hwgw(ns: NS, target: string, hackThreads: number, hackScript: string, growScript: string, weakenScript: string) {
-    const weakenTime = ns.getWeakenTime(target);
-    const hackTime = ns.getHackTime(target);
-    const growTime = ns.getGrowTime(target);
+    const targetServer = ns.getServer(target)
+    const player = ns.getPlayer()
+    const weakenTime = getWeakenTime(targetServer, player)
+    const hackTime = getHackTime(targetServer, player);
+    const growTime = getGrowTime(targetServer, player);
     const longestTime = Math.max(weakenTime, hackTime, growTime);
 
     const hackCost = ns.getScriptRam(hackScript) * hackThreads;
     const hackGain = ns.hackAnalyze(target) * hackThreads;
+    const maxHackThreads = 1 / ns.hackAnalyze(target);
     const hackAmountGain = ns.getServerMoneyAvailable(target) * hackGain;
     const hackSecurityGain = ns.hackAnalyzeSecurity(hackThreads);
     const hackWeakenThreads = weakenThreadsRequired(ns, hackSecurityGain);
     const hackWeakenCost = ns.getScriptRam(weakenScript) * hackWeakenThreads;
-    const percentageRequired = (growthPercentageRequired(ns, target, hackGain) + 0.02) || 0;
-    const growThreads = Math.ceil(ns.growthAnalyze(target, 1 + percentageRequired, CORES)) || 1;
+    const percentageRequired = (growthPercentageRequired(ns, target, hackGain)) || 0;
+    const growThreads = Math.ceil(ns.growthAnalyze(target, 1 + percentageRequired)) || 1;
     const growCost = ns.getScriptRam(growScript) * growThreads;
     const growSecurityGain = ns.growthAnalyzeSecurity(growThreads);
     const growWeakenThreads = weakenThreadsRequired(ns, growSecurityGain);
@@ -70,6 +85,7 @@ function hwgw(ns: NS, target: string, hackThreads: number, hackScript: string, g
     const gainPerMs = hackAmountGain / longestTime;
     const gainPerMsPerGB = gainPerMs / (hackCost + hackWeakenCost + growCost + growWeakenCost);
     return {
+        maxHackThreads,
         batchTime: longestTime,
         gainPerMs,
         gainPerMsPerGB,
@@ -101,9 +117,9 @@ function hwgw(ns: NS, target: string, hackThreads: number, hackScript: string, g
     };
 }
 
-async function runHackBatch(ns: NS, target: string, hackThreads: number, hackScript: string, growScript: string, weakenScript: string, delay: number, longestTime?: number, batches?: number) {
+async function runHackBatch(ns: NS, target: string, hackThreads: number, hackScript: string, growScript: string, weakenScript: string, delay: number, batches?: number) {
     const batchDetails = hwgw(ns, target, hackThreads, hackScript, growScript, weakenScript);
-    const { hackDelay, growDelay, weakenDelay } = getDelays(ns, target, longestTime);
+    const { hackDelay, growDelay, weakenDelay } = getDelays(ns, target);
     let offset = 0;
     let requests: AllocateRequest[] = [];
     for (let i = 0; i < (batches || 1); i++) {
@@ -148,7 +164,7 @@ async function runHackBatch(ns: NS, target: string, hackThreads: number, hackScr
 
 async function runHackBatchStatic(ns: NS, target: string, hackThreads: number, hackScript: string, growScript: string, weakenScript: string, delay: number, host: string, longestTime?: number) {
     const batchDetails = hwgw(ns, target, hackThreads, hackScript, growScript, weakenScript);
-    const { hackDelay, growDelay, weakenDelay } = getDelays(ns, target, longestTime);
+    const { hackDelay, growDelay, weakenDelay } = getDelays(ns, target);
     await ns.scp([hackScript, growScript, weakenScript], host);
     const hackPid = ns.exec(hackScript, host, batchDetails.hack.threads, ...[target, hackDelay + (0 * delay), 'hack', generateUuid()])
     await ns.asleep(delay);
@@ -169,8 +185,10 @@ async function runHackBatchStatic(ns: NS, target: string, hackThreads: number, h
 }
 
 function wgw(ns: NS, target: string, growScript: string, weakenScript: string, targetGrowth: number) {
-    const weakenTime = ns.getWeakenTime(target);
-    const growTime = ns.getGrowTime(target);
+    const targetServer = ns.getServer(target);
+    const player = ns.getPlayer();
+    const weakenTime = getWeakenTime(targetServer, player);
+    const growTime = getGrowTime(targetServer, player);
     const longestTime = Math.max(weakenTime, growTime);
 
     const secDiff = ns.getServerSecurityLevel(target) - ns.getServerMinSecurityLevel(target);
@@ -205,18 +223,18 @@ function wgw(ns: NS, target: string, growScript: string, weakenScript: string, t
     };
 }
 
-async function runGrowBatch(ns: NS, target: string, growScript: string, weakenScript: string, targetGrowth: number, delay: number, longestTime?: number, batches?: number) {
+async function runGrowBatch(ns: NS, target: string, growScript: string, weakenScript: string, targetGrowth: number, delay: number, batches?: number) {
     let offset = 0;
     let requests: AllocateRequest[] = [];
     let pids = [0, 0, 0];
     let tries = 0;
-    while (pids.some((pid: number) => !pid)) {
+    while (!pids.some((pid: number) => pid)) {
         if (tries++ >= 10) {
             ns.print('failed to run grow batch')
             ns.exit();
         }
         const batchDetails = wgw(ns, target, growScript, weakenScript, targetGrowth);
-        const { growDelay, weakenDelay } = getDelays(ns, target, longestTime);
+        const { growDelay, weakenDelay } = getDelays(ns, target);
         for (const pid of pids) {
             ns.kill(pid);
         }
@@ -244,6 +262,7 @@ async function runGrowBatch(ns: NS, target: string, growScript: string, weakenSc
                 args: [target, weakenDelay + (offset++ * delay), 'growWeaken', generateUuid()],
             });
         }
+        offset++;
         const response = await request(ns, 1, 2, { type: 'allocateAll', requests });
         pids = response.pids;
         targetGrowth = targetGrowth * 0.5;
@@ -276,7 +295,7 @@ async function runGrowBatchHome(ns: NS, target: string, growScript: string, weak
 
 function weakenThreadsRequired(ns: NS, securityAmount: number) {
     let threads = 0;
-    while (ns.weakenAnalyze(threads, CORES) < securityAmount) threads += 1;
+    while (ns.weakenAnalyze(threads) < securityAmount) threads += 1;
     return threads + 1;
 }
 
@@ -365,4 +384,21 @@ export function rankServers(ns: NS, hackThreads: number) {
     return hosts;
 }
 
-export { getAllHosts, pick, getPaths, wgw, generateUuid, request, getDelays, noWaitRequest, allocateAll, freeAll, hwgw, runHackBatch, runGrowBatch, runHackBatchStatic, runGrowBatchHome };
+export {
+    getAllHosts,
+    pick,
+    getPaths,
+    wgw,
+    generateUuid,
+    request,
+    getDelays,
+    noWaitRequest,
+    allocateAll,
+    freeAll,
+    hwgw,
+    runHackBatch,
+    runGrowBatch,
+    runHackBatchStatic,
+    runGrowBatchHome,
+    getAvailableServers,
+};
