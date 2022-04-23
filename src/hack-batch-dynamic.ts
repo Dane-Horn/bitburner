@@ -1,14 +1,14 @@
 import { NS } from 'NetscriptDefinitions';
 import { getDelays, runGrowBatch, runHackBatch } from './scripts/util'
 
-const delay = 150;
+const delay = 35;
 const hackScript = `/scripts/hack.js`;
 const growScript = `/scripts/grow.js`;
 const weakenScript = `/scripts/weaken.js`;
 
 
 export async function main(ns: NS) {
-    let [target, hackThreads, groupSize] = ns.args as [string, number, number, string];
+    let [target, percentageToSteal = 0.5, groupSize] = ns.args as [string, number, number, string];
     ns.disableLog('ALL');
     while (true) {
         while (targetNotOptimized(ns, target)) {
@@ -21,16 +21,16 @@ export async function main(ns: NS) {
             await ns.asleep(longestTime + delay * 8);
         }
         const { longestTime } = getDelays(ns, target);
-        let success = false;
+        let batchesRun = 0;
         do {
-            success = await runHackBatch(ns, target, hackThreads, hackScript, growScript, weakenScript, delay, groupSize);
-            if (!success) groupSize -= 1;
-        } while (!success);
-        ns.print(`running ${groupSize} batches`);
-        ns.print(`sleeping for: ${longestTime + delay * 5 * groupSize}`);
-        await ns.asleep(longestTime + delay * 5 * groupSize);
-        if (groupSize <= 45)
-            groupSize += 5;
+            batchesRun = await runHackBatch(ns, target, percentageToSteal, hackScript, growScript, weakenScript, delay, groupSize);
+            if (batchesRun === 0) groupSize -= 1;
+            if (groupSize <= 0) ns.exit();
+        } while (batchesRun === 0);
+        ns.print(`running ${batchesRun} batches`);
+        ns.print(`sleeping for: ${longestTime + delay * 5 * batchesRun}`);
+        await ns.asleep(longestTime + delay * 5 * batchesRun);
+        if (batchesRun >= groupSize) groupSize += 5;
         ns.print('batches completed');
     }
 }

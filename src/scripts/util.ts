@@ -60,23 +60,24 @@ function getDelays(ns: NS, target: string) {
     };
 }
 
-function hwgw(ns: NS, target: string, hackThreads: number, hackScript: string, growScript: string, weakenScript: string) {
+function hwgw(ns: NS, target: string, percentageToSteal: number, hackScript: string, growScript: string, weakenScript: string) {
+    const hackThreads = Math.ceil(percentageToSteal / ns.hackAnalyze(target));
+    if (hackThreads === Infinity) throw new Error('infinite hack threads required');
+    const maxBatches = Math.floor(ns.getWeakenTime(target) / (35 * 4))
     const targetServer = ns.getServer(target)
     const player = ns.getPlayer()
     const weakenTime = getWeakenTime(targetServer, player)
     const hackTime = getHackTime(targetServer, player);
     const growTime = getGrowTime(targetServer, player);
     const longestTime = Math.max(weakenTime, hackTime, growTime);
-
     const hackCost = ns.getScriptRam(hackScript) * hackThreads;
     const hackGain = ns.hackAnalyze(target) * hackThreads;
-    const maxHackThreads = 1 / ns.hackAnalyze(target);
     const hackAmountGain = ns.getServerMoneyAvailable(target) * hackGain;
     const hackSecurityGain = ns.hackAnalyzeSecurity(hackThreads);
     const hackWeakenThreads = weakenThreadsRequired(ns, hackSecurityGain);
     const hackWeakenCost = ns.getScriptRam(weakenScript) * hackWeakenThreads;
     const percentageRequired = (growthPercentageRequired(ns, target, hackGain)) || 0;
-    const growThreads = Math.ceil(ns.growthAnalyze(target, 1 + percentageRequired)) || 1;
+    const growThreads = Math.ceil(ns.growthAnalyze(target, 1 + (percentageRequired * 1.1))) || 1;
     const growCost = ns.getScriptRam(growScript) * growThreads;
     const growSecurityGain = ns.growthAnalyzeSecurity(growThreads);
     const growWeakenThreads = weakenThreadsRequired(ns, growSecurityGain);
@@ -85,7 +86,7 @@ function hwgw(ns: NS, target: string, hackThreads: number, hackScript: string, g
     const gainPerMs = hackAmountGain / longestTime;
     const gainPerMsPerGB = gainPerMs / (hackCost + hackWeakenCost + growCost + growWeakenCost);
     return {
-        maxHackThreads,
+        maxBatches,
         batchTime: longestTime,
         gainPerMs,
         gainPerMsPerGB,
@@ -117,12 +118,13 @@ function hwgw(ns: NS, target: string, hackThreads: number, hackScript: string, g
     };
 }
 
-async function runHackBatch(ns: NS, target: string, hackThreads: number, hackScript: string, growScript: string, weakenScript: string, delay: number, batches?: number) {
-    const batchDetails = hwgw(ns, target, hackThreads, hackScript, growScript, weakenScript);
+async function runHackBatch(ns: NS, target: string, percentageToSteal: number, hackScript: string, growScript: string, weakenScript: string, delay: number, batches?: number) {
+    const batchDetails = hwgw(ns, target, percentageToSteal, hackScript, growScript, weakenScript);
     const { hackDelay, growDelay, weakenDelay } = getDelays(ns, target);
     let offset = 0;
     let requests: AllocateRequest[] = [];
-    for (let i = 0; i < (batches || 1); i++) {
+    batches = Math.min(batches || 1, batchDetails.maxBatches);
+    for (let i = 0; i < (batches); i++) {
         requests.push({
             type: 'allocate',
             script: hackScript,
@@ -157,9 +159,9 @@ async function runHackBatch(ns: NS, target: string, hackThreads: number, hackScr
         for (const pid of pids) {
             ns.kill(pid);
         }
-        return false;
+        return 0;
     }
-    return true;
+    return batches;
 }
 
 async function runHackBatchStatic(ns: NS, target: string, hackThreads: number, hackScript: string, growScript: string, weakenScript: string, delay: number, host: string, longestTime?: number) {
@@ -228,7 +230,7 @@ async function runGrowBatch(ns: NS, target: string, growScript: string, weakenSc
     let requests: AllocateRequest[] = [];
     let pids = [0, 0, 0];
     let tries = 0;
-    while (!pids.some((pid: number) => pid)) {
+    while (!pids.every((pid: number) => pid)) {
         if (tries++ >= 10) {
             ns.print('failed to run grow batch')
             ns.exit();
@@ -265,6 +267,7 @@ async function runGrowBatch(ns: NS, target: string, growScript: string, weakenSc
         offset++;
         const response = await request(ns, 1, 2, { type: 'allocateAll', requests });
         pids = response.pids;
+        ns.print(pids)
         targetGrowth = targetGrowth * 0.5;
     }
 }

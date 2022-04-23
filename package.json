@@ -5,6 +5,7 @@
   "main": "clearPorts.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "watch": "tsc --watch",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
