@@ -1,18 +1,18 @@
 import { NS } from "NetscriptDefinitions";
 import { getGrowTime, getHackTime, getWeakenTime } from "scripts/formulas";
 
-function getAllHosts(ns: NS, current: string, depth: number, result: string[]) {
-    result.push(current);
-    const neighbours = ns.scan(current)
-        .filter((host) => !result.includes(host));
-    for (const neighbour of neighbours) {
-        result = getAllHosts(ns, neighbour, depth + 1, result);
-    }
-    return result;
+function getAllHosts(ns: NS) {
+    let q = ["home"];
+    const duplicates = Array(30).fill('')
+        .map(_ => q = [...new Set(
+            q.map(s => [s, ns.scan(s)]).flat(2))]
+        )
+        .flat(2);
+    return [...new Set(duplicates)];
 }
 
 function getAvailableServers(ns: NS) {
-    const servers = getAllHosts(ns, 'home', 0, [])
+    const servers = getAllHosts(ns)
         .map(host => ns.getServer(host))
         .filter(server => server.hostname !== 'home' && server.hasAdminRights)
         .map((server) => { return { name: server.hostname, available: server.maxRam - server.ramUsed } })
@@ -226,6 +226,7 @@ function wgw(ns: NS, target: string, growScript: string, weakenScript: string, t
 }
 
 async function runGrowBatch(ns: NS, target: string, growScript: string, weakenScript: string, targetGrowth: number, delay: number, batches?: number) {
+    const server = ns.getServer(target)
     let offset = 0;
     let requests: AllocateRequest[] = [];
     let pids = [0, 0, 0];
@@ -241,7 +242,7 @@ async function runGrowBatch(ns: NS, target: string, growScript: string, weakenSc
             ns.kill(pid);
         }
         requests = [];
-        for (let i = 0; i < (batches || 1); i++) {
+        if (server.hackDifficulty > server.minDifficulty) {
             requests.push({
                 type: 'allocate',
                 script: weakenScript,
@@ -249,6 +250,8 @@ async function runGrowBatch(ns: NS, target: string, growScript: string, weakenSc
                 threads: batchDetails.weaken.threads,
                 args: [target, weakenDelay + (offset++ * delay), 'hackWeaken', generateUuid()],
             });
+        }
+        if (server.moneyAvailable < server.moneyMax) {
             requests.push({
                 type: 'allocate',
                 script: growScript,
@@ -360,7 +363,7 @@ export function rankServers(ns: NS, hackThreads: number) {
     const hackScript = '/scripts/hack.js';
     const growScript = '/scripts/grow.js';
     const weakenScript = '/scripts/weaken.js';
-    const hosts = getAllHosts(ns, 'home', 0, [])
+    const hosts = getAllHosts(ns)
         .map((host: string) => mostEfficient(ns, host, hackThreads, hackScript, growScript, weakenScript))
         .filter(({ server: { hasAdminRights } }) => hasAdminRights)
         .filter(({ hwgw: { gainPerMsPerGB }, server: { moneyMax } }) => moneyMax && gainPerMsPerGB)

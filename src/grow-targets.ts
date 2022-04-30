@@ -6,7 +6,7 @@ export async function main(ns: NS) {
 	const [targetGrowth] = ns.args as [number];
 	const growScript = '/scripts/grow.js';
 	const weakenScript = '/scripts/weaken.js';
-	const hosts = getAllHosts(ns, 'home', 0, [])
+	const hosts = getAllHosts(ns)
 		.map((host: string) => { return { host, server: ns.getServer(host) } })
 		.filter(({ server: { moneyAvailable, moneyMax } }) => moneyAvailable < moneyMax)
 		.map((obj: any) => { return { ...obj, wgw: wgw(ns, obj.host, growScript, weakenScript, targetGrowth) } })

@@ -6,7 +6,7 @@ export async function main(ns: NS) {
 	const hackScript = '/scripts/hack.js';
 	const growScript = '/scripts/grow.js';
 	const weakenScript = '/scripts/weaken.js';
-	const hosts = getAllHosts(ns, 'home', 0, [])
+	const hosts = getAllHosts(ns)
         .filter((host: string) => {
             const threadsNeeded = Math.ceil(0.5 / ns.hackAnalyze(host))
             return threadsNeeded !== Infinity;

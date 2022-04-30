@@ -3,9 +3,9 @@ import { pick, getAllHosts } from './scripts/util'
 
 /** @param {NS} ns **/
 export async function main(ns: NS) {
-	const [filter, ...select] = ns.args as [string, ...string[]];
+	const [filter = "() => true", ...select] = ns.args as [string, ...string[]];
 	ns.tprint(select);
-	const hosts = getAllHosts(ns, ns.getHostname(), 0, [])
+	const hosts = getAllHosts(ns)
 		.map((host: string) => ns.getServer(host))
 		.map((server: Server) => select.length > 0 ? pick(server, select): server)
 		.filter(eval(filter as string));

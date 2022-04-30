@@ -4,7 +4,7 @@ import { getAllHosts } from './scripts/util';
 /** @param {NS} ns **/
 export async function main(ns: NS) {
     const servers =
-        getAllHosts(ns, 'home', 0, [])
+        getAllHosts(ns)
             .map((host: string) => ns.getServer(host))
             .filter(({ purchasedByPlayer }) => !purchasedByPlayer);
     const player = ns.getPlayer();
