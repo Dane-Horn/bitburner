@@ -32,6 +32,7 @@ export async function main(ns: NS) {
 				totalCost,
 				batchTime,
 				gainPerMsPerGB,
+                costs: `${hack.cost}:${hackWeaken.cost}:${grow.cost}:${growWeaken.cost}`,
 				ratio: `${hack.threads}:${hackWeaken.threads}:${grow.threads}:${growWeaken.threads}`,
 				moneyPercentage: server.moneyAvailable / server.moneyMax * 100,
 				minSec: server.minDifficulty,
