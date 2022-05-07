@@ -390,6 +390,33 @@ export function rankServers(ns: NS, hackThreads: number) {
     return hosts;
 }
 
+export function forEachServer(ns: NS, fn: any) {
+    let scan: (server: string, parent?: string) => void =
+        (server: string, parent?: string) => {
+            ns.scan(server)
+                .forEach(newServer => {
+                    if (newServer != parent) {
+                        fn(newServer)
+                        scan(newServer, server)
+                    }
+                })
+        };
+    scan('home');
+}
+
+export function forEachServerSet(ns: NS, fn: any) {
+    const x = 1_000_000;
+    let scan = (server: string, seen: Set<String> = new Set()) => {
+            ns.scan(server)
+                .filter(newServer => !seen.has(newServer))
+                .forEach(newServer => {
+                    fn(newServer)
+                    scan(newServer, seen.add(server))
+                })
+        };
+    scan('home');
+}
+
 export {
     getAllHosts,
     pick,

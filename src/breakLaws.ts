@@ -16,11 +16,14 @@ export async function main(ns: NS) {
         'heist',
     ]
     const [crime] = ns.args as [string]
+    await ns.prompt("confirm committing crime")
+    ns.tail();
     while (true) {
         const bestCrime = crimes
             .map((crime) => getCrimeMetrics(ns, crime))
-            .filter(({ chance }) => chance > 0.5)
-            .reduce((max, next) => { return max.gainWithKarma > next.gainWithKarma ? max : next });
+            .reduce((max, next) => {
+                return ((max.karma * max.chance) / max.time) > ((next.karma * next.chance) / next.time) ? max : next
+            });
         ns.print(bestCrime)
         ns.singularity.commitCrime(crime || bestCrime.name);
         while (ns.singularity.isBusy()) {
@@ -28,6 +31,7 @@ export async function main(ns: NS) {
             ns.print('committing crime - please standby')
             await ns.asleep(250);
         }
+        ns.toast(`Karma: ${(ns as any).heart.break()}`)
     }
 }
 
