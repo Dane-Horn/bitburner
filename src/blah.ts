@@ -1,9 +1,5 @@
 import { NS } from "../NetscriptDefinitions";
-import { forEachServer, forEachServerSet } from "./scripts/util";
-
+const _ = require('./lodash.js')
 export async function main(ns: NS) {
-    for (const prop in ns) {
-        ns.tprint(prop)
-    }
-    ns.tprint((ns as any).toString())
+    ns.tprint(_.clamp(-10, 0, 100))
 }

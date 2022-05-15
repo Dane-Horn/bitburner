@@ -22,7 +22,7 @@ export async function main(ns: NS) {
         const bestCrime = crimes
             .map((crime) => getCrimeMetrics(ns, crime))
             .reduce((max, next) => {
-                return ((max.karma * max.chance) / max.time) > ((next.karma * next.chance) / next.time) ? max : next
+                return ((max.money * max.chance) / max.time) > ((next.money * next.chance) / next.time) ? max : next
             });
         ns.print(bestCrime)
         ns.singularity.commitCrime(crime || bestCrime.name);

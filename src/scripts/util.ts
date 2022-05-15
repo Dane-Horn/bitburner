@@ -1,7 +1,10 @@
 import { NS } from "NetscriptDefinitions";
 import { getGrowTime, getHackTime, getWeakenTime } from "scripts/formulas";
-
-function getAllHosts(ns: NS) {
+const HACK_COST = 1.70;
+const GROW_COST = 1.75;
+const WEAKEN_COST = 1.70;
+const DELAY = 35;
+export function getAllHosts(ns: NS) {
     let q = ["home"];
     const duplicates = Array(30).fill('')
         .map(_ => q = [...new Set(
@@ -11,7 +14,7 @@ function getAllHosts(ns: NS) {
     return [...new Set(duplicates)];
 }
 
-function getAvailableServers(ns: NS) {
+export function getAvailableServers(ns: NS) {
     const servers = getAllHosts(ns)
         .map(host => ns.getServer(host))
         .filter(server => server.hostname !== 'home' && server.hasAdminRights)
@@ -21,19 +24,19 @@ function getAvailableServers(ns: NS) {
     return servers;
 }
 
-function pick(obj: any, fields: string[]) {
+export function pick(obj: any, fields: string[]) {
     return fields
         .filter((field) => field in obj)
         .reduce((obj2: any, key) => (obj2[key] = obj[key], obj2), {});
 }
 
-function getPaths(ns: NS, source: string) {
+export function getPaths(ns: NS, source: string) {
     const paths: { [x: string]: string[]; } = buildPaths(ns, source, 0, [], {});
     Object.entries(paths).forEach(([_key, path]) => path.shift());
     return paths;
 }
 
-function buildPaths(ns: NS, current: string, depth: number, path: string[], result: { [x: string]: string[]; }) {
+export function buildPaths(ns: NS, current: string, depth: number, path: string[], result: { [x: string]: string[]; }) {
     path.push(current);
     result[current] = path;
     const neighbours = ns.scan(current)
@@ -45,7 +48,7 @@ function buildPaths(ns: NS, current: string, depth: number, path: string[], resu
     return result;
 }
 
-function getDelays(ns: NS, target: string) {
+export function getDelays(ns: NS, target: string) {
     const targetServer = ns.getServer(target);
     const player = ns.getPlayer();
     const weakenTime = getWeakenTime(targetServer, player);
@@ -60,28 +63,29 @@ function getDelays(ns: NS, target: string) {
     };
 }
 
-function hwgw(ns: NS, target: string, percentageToSteal: number, hackScript: string, growScript: string, weakenScript: string) {
+export function hwgw(ns: NS, target: string, percentageToSteal: number) {
     const hackThreads = Math.ceil(percentageToSteal / ns.hackAnalyze(target));
     if (hackThreads === Infinity) throw new Error('infinite hack threads required');
-    const maxBatches = Math.floor(ns.getWeakenTime(target) / (35 * 4))
-    const targetServer = ns.getServer(target)
-    const player = ns.getPlayer()
-    const weakenTime = getWeakenTime(targetServer, player)
-    const hackTime = getHackTime(targetServer, player);
-    const growTime = getGrowTime(targetServer, player);
+    const maxBatches = Math.floor(ns.getWeakenTime(target) / (DELAY * 4));
+    const targetServer = ns.getServer(target);
+    targetServer.hackDifficulty = targetServer.minDifficulty;
+    targetServer.moneyAvailable = targetServer.moneyMax;
+    const weakenTime = ns.getWeakenTime(targetServer.hostname);
+    const hackTime = ns.getHackTime(targetServer.hostname);
+    const growTime = ns.getGrowTime(targetServer.hostname);
     const longestTime = Math.max(weakenTime, hackTime, growTime);
-    const hackCost = ns.getScriptRam(hackScript) * hackThreads;
+    const hackCost = HACK_COST * hackThreads;
     const hackGain = ns.hackAnalyze(target) * hackThreads;
     const hackAmountGain = ns.getServerMoneyAvailable(target) * hackGain;
     const hackSecurityGain = ns.hackAnalyzeSecurity(hackThreads);
     const hackWeakenThreads = weakenThreadsRequired(ns, hackSecurityGain);
-    const hackWeakenCost = ns.getScriptRam(weakenScript) * hackWeakenThreads;
-    const percentageRequired = (growthPercentageRequired(ns, target, hackGain)) || 0;
+    const hackWeakenCost = WEAKEN_COST * hackWeakenThreads;
+    const percentageRequired = Math.min(1, (growthPercentageRequired(ns, target, hackGain)) || 0);
     const growThreads = Math.ceil(ns.growthAnalyze(target, 1 + (percentageRequired * 1.1))) || 1;
-    const growCost = ns.getScriptRam(growScript) * growThreads;
+    const growCost = GROW_COST * growThreads;
     const growSecurityGain = ns.growthAnalyzeSecurity(growThreads);
     const growWeakenThreads = weakenThreadsRequired(ns, growSecurityGain);
-    const growWeakenCost = ns.getScriptRam(weakenScript) * growWeakenThreads;
+    const growWeakenCost = WEAKEN_COST * growWeakenThreads;
 
     const gainPerMs = hackAmountGain / longestTime;
     const gainPerMsPerGB = gainPerMs / (hackCost + hackWeakenCost + growCost + growWeakenCost);
@@ -118,8 +122,8 @@ function hwgw(ns: NS, target: string, percentageToSteal: number, hackScript: str
     };
 }
 
-async function runHackBatch(ns: NS, target: string, percentageToSteal: number, hackScript: string, growScript: string, weakenScript: string, delay: number, batches?: number) {
-    const batchDetails = hwgw(ns, target, percentageToSteal, hackScript, growScript, weakenScript);
+export async function runHackBatch(ns: NS, target: string, percentageToSteal: number, hackScript: string, growScript: string, weakenScript: string, delay: number, batches?: number) {
+    const batchDetails = hwgw(ns, target, percentageToSteal);
     const { hackDelay, growDelay, weakenDelay } = getDelays(ns, target);
     let offset = 0;
     let requests: AllocateRequest[] = [];
@@ -164,29 +168,7 @@ async function runHackBatch(ns: NS, target: string, percentageToSteal: number, h
     return batches;
 }
 
-async function runHackBatchStatic(ns: NS, target: string, hackThreads: number, hackScript: string, growScript: string, weakenScript: string, delay: number, host: string, longestTime?: number) {
-    const batchDetails = hwgw(ns, target, hackThreads, hackScript, growScript, weakenScript);
-    const { hackDelay, growDelay, weakenDelay } = getDelays(ns, target);
-    await ns.scp([hackScript, growScript, weakenScript], host);
-    const hackPid = ns.exec(hackScript, host, batchDetails.hack.threads, ...[target, hackDelay + (0 * delay), 'hack', generateUuid()])
-    await ns.asleep(delay);
-    const hackWeakenPid = ns.exec(weakenScript, 'home', batchDetails.hackWeaken.threads, ...[target, weakenDelay + (1 * delay), 'hackWeaken', generateUuid()]);
-    await ns.asleep(delay);
-    const growPid = ns.exec(growScript, 'home', batchDetails.grow.threads, ...[target, growDelay + (2 * delay), 'grow', generateUuid()]);
-    await ns.asleep(delay);
-    const growWeakenPid = ns.exec(weakenScript, 'home', batchDetails.growWeaken.threads, ...[target, weakenDelay + (3 * delay), 'growWeaken', generateUuid()]);
-    await ns.asleep(delay);
-    ns.print(`${hackPid} ${hackWeakenPid} ${growPid} ${growWeakenPid}`)
-    if (!(hackPid || hackWeakenPid || growPid || growWeakenPid)) {
-        ns.kill(hackPid);
-        ns.kill(hackWeakenPid);
-        ns.kill(growPid);
-        ns.kill(growWeakenPid);
-        ns.exit();
-    }
-}
-
-function wgw(ns: NS, target: string, growScript: string, weakenScript: string, targetGrowth: number) {
+export function wgw(ns: NS, target: string, growScript: string, weakenScript: string, targetGrowth: number) {
     const targetServer = ns.getServer(target);
     const player = ns.getPlayer();
     const weakenTime = getWeakenTime(targetServer, player);
@@ -225,7 +207,7 @@ function wgw(ns: NS, target: string, growScript: string, weakenScript: string, t
     };
 }
 
-async function runGrowBatch(ns: NS, target: string, growScript: string, weakenScript: string, targetGrowth: number, delay: number, batches?: number) {
+export async function runGrowBatch(ns: NS, target: string, growScript: string, weakenScript: string, targetGrowth: number, delay: number, batches?: number) {
     const server = ns.getServer(target)
     let offset = 0;
     let requests: AllocateRequest[] = [];
@@ -275,69 +257,47 @@ async function runGrowBatch(ns: NS, target: string, growScript: string, weakenSc
     }
 }
 
-async function runGrowBatchHome(ns: NS, target: string, growScript: string, weakenScript: string, targetGrowth: number, delay: number) {
-    let weakenPid = 0,
-        growPid = 0,
-        growWeakenPid = 0,
-        i = 0;
-    while (weakenPid == 0 || growPid == 0 || growWeakenPid == 0) {
-        ns.kill(weakenPid)
-        ns.kill(growPid)
-        ns.kill(growWeakenPid)
-        ns.tprint(`target growth: ${targetGrowth}`)
-        ns.tprint(`pids: ${weakenPid} ${growPid} ${growWeakenPid}`)
-        if (i++ >= 10) ns.exit();
-        const batchDetails = wgw(ns, target, growScript, weakenScript, targetGrowth);
-        const { growDelay, weakenDelay } = getDelays(ns, target);
-        weakenPid = ns.exec(weakenScript, 'home', batchDetails.weaken.threads || 1, ...[target, weakenDelay + (0 * delay), 'weaken', generateUuid()]);
-        await ns.asleep(delay);
-        growPid = ns.exec(growScript, 'home', batchDetails.grow.threads || 1, ...[target, growDelay + (1 * delay), 'grow', generateUuid()]);
-        await ns.asleep(delay);
-        growWeakenPid = ns.exec(weakenScript, 'home', batchDetails.growWeaken.threads || 1, ...[target, weakenDelay + (2 * delay), 'growWeaken', generateUuid()]);
-        await ns.asleep(delay);
-        targetGrowth = targetGrowth * 0.5
-    }
-}
-
-function weakenThreadsRequired(ns: NS, securityAmount: number) {
+export function weakenThreadsRequired(ns: NS, securityAmount: number) {
     let threads = 0;
     while (ns.weakenAnalyze(threads) < securityAmount) threads += 1;
     return threads + 1;
 }
 
-function growthPercentageRequired(ns: NS, target: string, percentageLost: number) {
+export function growthPercentageRequired(ns: NS, target: string, percentageLost: number) {
     const available = ns.getServerMoneyAvailable(target);
     const afterHack = available * (1 - percentageLost);
     const percentageRequired = (available - afterHack) / afterHack;
     return percentageRequired;
 }
 
-var lut: any = []; for (var i = 0; i < 256; i++) { lut[i] = (i < 16 ? '0' : '') + (i).toString(16); }
-function generateUuid() {
-    var d0 = Math.random() * 0xffffffff | 0;
-    var d1 = Math.random() * 0xffffffff | 0;
-    var d2 = Math.random() * 0xffffffff | 0;
-    var d3 = Math.random() * 0xffffffff | 0;
+export function generateUuid() {
+    const lut: any = []; for (let i = 0; i < 256; i++) { lut[i] = (i < 16 ? '0' : '') + (i).toString(16); }
+    const d0 = Math.random() * 0xffffffff | 0;
+    const d1 = Math.random() * 0xffffffff | 0;
+    const d2 = Math.random() * 0xffffffff | 0;
+    const d3 = Math.random() * 0xffffffff | 0;
     return lut[d0 & 0xff] + lut[d0 >> 8 & 0xff] + lut[d0 >> 16 & 0xff] + lut[d0 >> 24 & 0xff] + '-' +
         lut[d1 & 0xff] + lut[d1 >> 8 & 0xff] + '-' + lut[d1 >> 16 & 0x0f | 0x40] + lut[d1 >> 24 & 0xff] + '-' +
         lut[d2 & 0x3f | 0x80] + lut[d2 >> 8 & 0xff] + '-' + lut[d2 >> 16 & 0xff] + lut[d2 >> 24 & 0xff] +
         lut[d3 & 0xff] + lut[d3 >> 8 & 0xff] + lut[d3 >> 16 & 0xff] + lut[d3 >> 24 & 0xff];
 }
 
-async function request(ns: NS, requestPort: number, responsePort: number, request: any) {
+export async function request(ns: NS, requestPort: number, responsePort: number, request: any) {
     const requestId = generateUuid();
-    await ns.tryWritePort(requestPort, JSON.stringify({ ...request, requestId }));
-    while (ns.peek(responsePort) == 'NULL PORT DATA' || JSON.parse(ns.peek(responsePort)).requestId != requestId) await ns.asleep(200);
-    return JSON.parse(ns.readPort(responsePort));
+    const requestHandle = ns.getPortHandle(requestPort);
+    const responseHandle = ns.getPortHandle(responsePort);
+    requestHandle.tryWrite(JSON.stringify({ ...request, requestId }));
+    while (responseHandle.empty() || JSON.parse(ns.peek(responsePort)).requestId != requestId) await ns.asleep(100);
+    return JSON.parse(responseHandle.read() as string);
 }
 
-async function noWaitRequest(ns: NS, requestPort: number, request: any) {
+export async function noWaitRequest(ns: NS, requestPort: number, request: any) {
     const requestId = generateUuid();
     await ns.tryWritePort(requestPort, JSON.stringify({ ...request, requestId }));
     return;
 }
 
-async function allocateAll(ns: NS, allocateRequests: any[]) {
+export async function allocateAll(ns: NS, allocateRequests: any[]) {
     const result = [];
     for (const req of allocateRequests) {
         result.push(await request(ns, 1, 2, req));
@@ -345,93 +305,49 @@ async function allocateAll(ns: NS, allocateRequests: any[]) {
     return result;
 }
 
-async function freeAll(ns: NS, freeRequests: any[]) {
+export async function freeAll(ns: NS, freeRequests: any[]) {
     for (const req of freeRequests) {
         await noWaitRequest(ns, 1, req);
     }
 }
 
-export function mostEfficient(ns: NS, host: string, maxThreads: number, hackScript: string, growScript: string, weakenScript: string) {
+export function mostEfficient(ns: NS, host: string, maxPercentage: number) {
     const range = (start: number, stop: number, step: number) =>
         Array.from({ length: (stop - start) / step + 1 }, (_, i) => start + (i * step));
-    return (range(1, maxThreads, 1) || [1])
-        .map((hackThreads) => { return { host, server: ns.getServer(host), hwgw: hwgw(ns, host, hackThreads, hackScript, growScript, weakenScript) } })
+    return (range(0.05, maxPercentage, 0.05) || [1])
+        .map((percentageToSteal) => { return { host, server: ns.getServer(host), hwgw: hwgw(ns, host, percentageToSteal) } })
         .sort((a, b) => b.hwgw.gainPerMsPerGB - a.hwgw.gainPerMsPerGB)[0];
 }
 
-export function rankServers(ns: NS, hackThreads: number) {
-    const hackScript = '/scripts/hack.js';
-    const growScript = '/scripts/grow.js';
-    const weakenScript = '/scripts/weaken.js';
+export function rankServers(ns: NS, percentageToSteal = 0.05) {
     const hosts = getAllHosts(ns)
-        .map((host: string) => mostEfficient(ns, host, hackThreads, hackScript, growScript, weakenScript))
-        .filter(({ server: { hasAdminRights } }) => hasAdminRights)
+        .filter((host: string) => {
+            const threadsNeeded = Math.ceil(0.5 / ns.hackAnalyze(host))
+            return threadsNeeded !== Infinity;
+        })
+        .map((host) => mostEfficient(ns, host, percentageToSteal))
+        // .filter(({ server: { hasAdminRights } }) => hasAdminRights)
         .filter(({ hwgw: { gainPerMsPerGB }, server: { moneyMax } }) => moneyMax && gainPerMsPerGB)
-        .sort((a: { hwgw: { gainPerMsPerGB: number; }; }, b: { hwgw: { gainPerMsPerGB: number; }; }) => b.hwgw.gainPerMsPerGB - a.hwgw.gainPerMsPerGB)
+        .sort((a: { hwgw: { gainPerMsPerGB: number; }; }, b: { hwgw: { gainPerMsPerGB: number; }; }) => a.hwgw.gainPerMsPerGB - b.hwgw.gainPerMsPerGB)
         .map(({
             host,
             hwgw: {
-                gainPerMsPerGB, hack, hackWeaken, grow, growWeaken, totalCost, batchTime,
+                gainPerMsPerGB, hack, hackWeaken, grow, growWeaken, totalCost, batchTime, maxBatches,
             },
             server
         }) => {
             return {
+                maxBatches,
                 host,
                 totalCost,
                 batchTime,
                 gainPerMsPerGB,
-                hackThreads: hack.threads,
+                costs: `${hack.cost}:${hackWeaken.cost}:${grow.cost}:${growWeaken.cost}`,
                 ratio: `${hack.threads}:${hackWeaken.threads}:${grow.threads}:${growWeaken.threads}`,
                 moneyPercentage: server.moneyAvailable / server.moneyMax * 100,
                 minSec: server.minDifficulty,
                 currSec: server.hackDifficulty,
             }
-        });
+        })
     return hosts;
 }
-
-export function forEachServer(ns: NS, fn: any) {
-    let scan: (server: string, parent?: string) => void =
-        (server: string, parent?: string) => {
-            ns.scan(server)
-                .forEach(newServer => {
-                    if (newServer != parent) {
-                        fn(newServer)
-                        scan(newServer, server)
-                    }
-                })
-        };
-    scan('home');
-}
-
-export function forEachServerSet(ns: NS, fn: any) {
-    const x = 1_000_000;
-    let scan = (server: string, seen: Set<String> = new Set()) => {
-            ns.scan(server)
-                .filter(newServer => !seen.has(newServer))
-                .forEach(newServer => {
-                    fn(newServer)
-                    scan(newServer, seen.add(server))
-                })
-        };
-    scan('home');
-}
-
-export {
-    getAllHosts,
-    pick,
-    getPaths,
-    wgw,
-    generateUuid,
-    request,
-    getDelays,
-    noWaitRequest,
-    allocateAll,
-    freeAll,
-    hwgw,
-    runHackBatch,
-    runGrowBatch,
-    runHackBatchStatic,
-    runGrowBatchHome,
-    getAvailableServers,
-};

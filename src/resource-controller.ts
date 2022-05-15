@@ -71,6 +71,6 @@ async function allocateAll(ns: NS, request: AllocateAllRequest) {
 }
 
 async function blockRead(ns: NS, port: number) {
-    while (ns.peek(port) == 'NULL PORT DATA') await ns.asleep(200);
+    while (ns.peek(port) == 'NULL PORT DATA') await ns.asleep(100);
     return ns.readPort(port);
 }
